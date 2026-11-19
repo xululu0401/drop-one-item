@@ -1,0 +1,482 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>剔掉一项再算</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif; background: #f5f3ef; color: #2a2724; line-height: 1.6; }
+  .wrap { max-width: 1040px; margin: 0 auto; padding: 20px 16px 40px; }
+  h1 { font-size: 26px; letter-spacing: 1px; }
+  .lead { color: #6a625a; font-size: 14px; margin: 4px 0 14px; }
+  .card { background: #fff; border-radius: 10px; padding: 14px; border: 1px solid #e3ddd4; min-width: 0; margin-bottom: 14px; }
+  .card h2 { font-size: 15px; color: #6a625a; font-weight: 600; margin-bottom: 8px; }
+  .inputs { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+  @media (max-width: 640px) { .inputs { grid-template-columns: minmax(0, 1fr); } }
+  label.f { display: block; font-size: 13px; color: #4f4842; }
+  label.f input { display: block; width: 100%; margin-top: 3px; padding: 6px 8px; font-size: 16px; border: 1px solid #d3cbc0; border-radius: 6px; background: #fffdfa; }
+  input.bad { border-color: #b3402e !important; background: #fff3ef !important; }
+  .presets { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 10px; }
+  button { font: inherit; font-size: 13px; padding: 6px 11px; border-radius: 6px; border: 1px solid #7a4b2a; background: #7a4b2a; color: #fff; cursor: pointer; }
+  button.ghost { background: #fff; color: #7a4b2a; }
+  #error { display: none; background: #fff3ef; border: 1px solid #e3b4a6; color: #8f2f1d; border-radius: 8px; padding: 10px 12px; margin-bottom: 14px; overflow-wrap: anywhere; }
+  #summary { font-size: 19px; font-weight: 700; overflow-wrap: anywhere; color: #2f6a45; }
+  #facts { margin: 8px 0 0 18px; font-size: 14px; color: #4f4842; } #facts li { margin: 2px 0; overflow-wrap: anywhere; }
+  .tblwrap { overflow-x: auto; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; min-width: 500px; }
+  th, td { padding: 6px 5px; border-top: 1px solid #eee7dd; text-align: right; }
+  th:first-child, td:first-child { text-align: left; }
+  @media (max-width: 640px) { table { min-width: 0; font-size: 12px; } th, td { padding: 6px 3px; } }
+  thead th { color: #6a625a; font-weight: 600; border-top: none; font-size: 12px; }
+  td.v-pos { color: #2f6a45; font-weight: 600; } td.v-neg { color: #b3402e; font-weight: 600; }
+  .contrib { margin: 12px 0; }
+  .cbar { display: flex; align-items: center; margin: 5px 0; font-size: 13px; }
+  .cbar .label { flex: none; width: 4em; color: #6a625a; }
+  .cbar .bar { height: 20px; border-radius: 4px; display: flex; align-items: center; justify-content: center; color: #fff; font-size: 11px; min-width: 2em; }
+  .cbar .bar.pos { background: #5f8a6c; } .cbar .bar.neg { background: #b3402e; }
+  .cbar .val { margin-left: 8px; color: #4f4842; white-space: nowrap; }
+  .scenarios { list-style: none; margin-top: 10px; }
+  .scenarios li { display: flex; gap: 10px; align-items: flex-start; justify-content: space-between; padding: 8px 0; border-top: 1px solid #eee7dd; font-size: 14px; }
+  .scenarios li:first-child { border-top: none; } .scenarios li span { overflow-wrap: anywhere; min-width: 0; }
+  .scenarios li button { flex: none; }
+  .dl { display: flex; gap: 6px; flex-wrap: wrap; }
+  .rules { font-size: 13px; color: #4f4842; } .rules p { margin: 4px 0; }
+  .note { font-size: 12px; color: #857c73; margin-top: 8px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>剔掉一项再算</h1>
+  <p class="lead">填总体变化率、其中一项的变化率、这一项在基期占总体多少。它算出剔掉这一项后其余合起来变了多少、两边各贡献了多少个百分点，以及这一项持平或变多少时总体刚好不涨不跌。</p>
+
+  <div class="card">
+    <h2>条件</h2>
+    <div class="inputs">
+      <label class="f">总体变化率（%）<input id="rTotal" inputmode="decimal"></label>
+      <label class="f">这一项的变化率（%）<input id="rItem" inputmode="decimal"></label>
+      <label class="f">这一项基期占总体（%）<input id="weight" inputmode="decimal"></label>
+    </div>
+    <div class="presets" id="presets"></div>
+  </div>
+
+  <div id="error"></div>
+
+  <div id="out" style="display:none;">
+  <div class="card">
+    <div id="summary"></div>
+    <ul id="facts"></ul>
+  </div>
+
+  <div class="card">
+    <h2>对照表</h2>
+    <div class="tblwrap"><table id="compare"><thead><tr></tr></thead><tbody></tbody></table></div>
+    <p class="note">基期归一化为 100；当期量 = 基期量 × (1 + 变化率)；贡献度单位是百分点（pp）。</p>
+  </div>
+
+  <div class="card">
+    <h2>贡献度拆解</h2>
+    <div class="contrib" id="contrib"></div>
+    <p class="note">贡献度 = 占比 × 变化率；正值 = 拉动（使总体上涨或少跌），负值 = 拖累（使总体下跌或少涨）。</p>
+  </div>
+
+  <div class="card">
+    <h2>反事实情景（点击应用到条件）</h2>
+    <ul class="scenarios" id="scenarios"></ul>
+  </div>
+  </div>
+
+  <div class="card">
+    <h2>导出与保存</h2>
+    <div class="dl">
+      <button id="dlPNG">结果卡 PNG</button>
+      <button class="ghost" id="dlCSV">CSV</button>
+      <button class="ghost" id="dlMD">Markdown</button>
+      <button class="ghost" id="dlJSON">JSON 备份</button>
+      <button class="ghost" id="reset">恢复默认例子</button>
+    </div>
+    <p class="note">条件自动保存在这台设备的浏览器里，刷新后还在；不上传任何数据。</p>
+  </div>
+
+  <div class="card rules">
+    <h2>怎么算的、算不了什么</h2>
+    <p>基期总量按 100 算，这一项 = 它的占比，其余 = 100 − 占比。当期量 = 基期量 × (1 + 变化率)。其余变化率 = (当期其余 - 基期其余) / 基期其余。贡献度（百分点）= 占比 × 变化率。</p>
+    <p>只按三个输入做线性加权拆解，默认总量 = 这一项 + 其余（物理量可加，如销售额、人数）。占比与变化率是你填的，不是统计局标准。默认例子是虚构的，不对应任何真实数据源。</p>
+    <p>本工具只求「其余各项合起来」变了多少，不拆其余内部谁涨谁跌。只能一次拆一项。比率（如利润率）不适用本公式。不评价任何行业、城市、企业，不预测未来。</p>
+  </div>
+</div>
+
+  <script>
+/* 剔掉一项再算 · 计算层（纯函数，Node 与浏览器共用）
+ * 模型：总体变化率 r_total、某这一项的变化率 r_item、这一项基期占总体 w（百分比）
+ *       → 其余变化率 r_rest、贡献度拆解（百分点）
+ * 假设：基期总量 = 100，分项 = w，其余 = 100-w；总量 = 分项 + 其余（线性可加） */
+(function (root) {
+  'use strict';
+  const LIM = { rate: [-100, 10000], weight: [0, 100] };
+  const TOL = 1e-9;
+
+  function fail(msg, field) { const e = new Error(msg); e.field = field; throw e; }
+  function num(v, name, field, lo, hi) {
+    const s = typeof v === 'number' ? String(v) : String(v == null ? '' : v).trim();
+    if (s === '') fail(name + '没填', field);
+    if (!/^-?\d+(\.\d+)?$/.test(s)) fail(name + '要填数字（现在是「' + s.slice(0, 20) + '」）', field);
+    const n = Number(s);
+    if (!isFinite(n)) fail(name + '不是有效数字', field);
+    if (n < lo || n > hi) fail(name + '要在 ' + fmt(lo) + '–' + fmt(hi) + ' 之间（现在是 ' + fmt(n) + '）', field);
+    return n;
+  }
+
+  function readInput(inp) {
+    const rTotal = num(inp.rTotal, '总体变化率', 'rTotal', LIM.rate[0], LIM.rate[1]);
+    const rItem = num(inp.rItem, '这一项的变化率', 'rItem', LIM.rate[0], LIM.rate[1]);
+    const weight = num(inp.weight, '这一项基期占总体', 'weight', LIM.weight[0], LIM.weight[1]);
+    if (weight === 100) fail('占比 100% 时其余不存在，没东西可算（只有这一项时，总体变化就是它的变化）', 'weight');
+    return { rTotal, rItem, weight };
+  }
+
+  /* 核心计算 */
+  function calculate(inp) {
+    const { rTotal, rItem, weight } = readInput(inp);
+    
+    /* 基期量（归一化） */
+    const baseTotal = 100;
+    const baseItem = weight;
+    const baseRest = 100 - weight;
+    
+    /* 当期量 */
+    const currentTotal = baseTotal * (1 + rTotal / 100);
+    const currentItem = baseItem * (1 + rItem / 100);
+    const currentRest = currentTotal - currentItem;
+    
+    /* 边界检查：当期其余不能为负（理论上不应发生，但数值计算可能越界） */
+    if (currentRest < -TOL) fail('三个数对不上：这一项当期就有 ' + fmt(currentItem) + '，比总体当期 ' + fmt(currentTotal) + ' 还多，其余只能是负数（基期总量按 100 算）。核对一下总体和这一项是不是同一个口径', 'currentRest');
+    
+    /* 其余变化率（百分比） */
+    const rRest = baseRest === 0 ? 0 : (currentRest - baseRest) / baseRest * 100;
+    
+    /* 贡献度（百分点） */
+    const contribItem = (weight / 100) * rItem;
+    const contribRest = ((100 - weight) / 100) * rRest;
+    const contribSum = contribItem + contribRest;
+    
+    /* 验算：贡献度之和应等于总变化率 */
+    const error = Math.abs(contribSum - rTotal);
+    if (error > 1e-6) fail('贡献度之和（' + fmt(contribSum) + '）与总变化率（' + fmt(rTotal) + '）不符，误差 ' + fmt(error) + '，请核对输入', 'verify');
+    
+    /* 当期权重（结构漂移） */
+    const weightCurrent = currentTotal === 0 ? 0 : (currentItem / currentTotal * 100);
+    
+    /* 反事实情景（都只改明确指定的变量，其余的实际变化保持不动） */
+    const w = weight / 100;
+    const cf = {
+      /* ① 基期就没有这一项：总体 = 其余本身的变化率 */
+      noItem: rRest,
+      /* ② 这一项持平（0%），其余照实际：总体只剩其余贡献 */
+      itemFlat: contribRest,
+      /* ③ 其余照实际，这一项要变多少总体才持平；权重 0 或需要跌破 -100% 时做不到 */
+      breakEvenItem: null,
+    };
+    if (w > 0) {
+      const be = -contribRest / w;
+      if (be >= -100 && be <= LIM.rate[1]) cf.breakEvenItem = be;
+      else cf.breakEvenNeed = be;
+    }
+    return {
+      input: { rTotal, rItem, weight },
+      base: { total: baseTotal, item: baseItem, rest: baseRest },
+      current: { total: currentTotal, item: currentItem, rest: currentRest },
+      rates: { total: rTotal, item: rItem, rest: rRest },
+      weights: { base: weight, current: weightCurrent },
+      contributions: { item: contribItem, rest: contribRest, sum: contribSum, error },
+      counterfactual: cf,
+      summary: makeSummary(rRest, contribItem, contribRest, weight),
+      facts: makeFacts(rTotal, rItem, rRest, weight, contribItem, contribRest),
+    };
+  }
+
+  function makeSummary(rRest, contribItem, contribRest, weight) {
+    if (Math.abs(rRest) < 1e-9) return '剔掉这一项，其余合起来持平（0%）';
+    return '剔掉这一项，其余合起来' + (rRest > 0 ? '涨了 ' : '跌了 ') + fmt(Math.abs(rRest)) + '%';
+  }
+
+  function makeFacts(rTotal, rItem, rRest, weight, contribItem, contribRest) {
+    const facts = [];
+    const w = weight / 100;
+    const wr = (100 - weight) / 100;
+    
+    facts.push('这一项占 ' + fmt(weight) + '%、变化 ' + fmtRate(rItem) + '，贡献 ' + fmtContrib(contribItem) + ' 个百分点');
+    facts.push('其余占 ' + fmt(100 - weight) + '%、变化 ' + fmtRate(rRest) + '，贡献 ' + fmtContrib(contribRest) + ' 个百分点');
+    facts.push('合起来：' + fmtContrib(contribItem) + (contribRest >= 0 ? ' + ' : ' − ') + fmt(Math.abs(contribRest)) + ' = ' + fmtContrib(rTotal) + ' 个百分点，就是总体的 ' + fmtRate(rTotal));
+    
+    /* 解读 */
+    
+    if (contribItem * contribRest < 0) {
+      const itemDir = contribItem > 0 ? '拉动' : '拖累';
+      const restDir = contribRest > 0 ? '拉动' : '拖累';
+      facts.push('这一项' + itemDir + '、其余' + restDir + '，方向相反，抵掉了一部分');
+    }
+    
+    return facts;
+  }
+
+  function fmt(n) {
+    if (!isFinite(n)) return String(n);
+    const a = Math.abs(n);
+    let s;
+    if (a >= 1e6) s = n.toFixed(0).replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+    else if (a >= 10) s = n.toFixed(2);
+    else if (a >= 1) s = n.toFixed(3);
+    else if (a >= 0.001) s = n.toFixed(3);
+    else if (a < 1e-9) return '0';
+    else return n.toExponential(2);
+    /* 去掉多余的尾零和小数点，但保留整数部分 */
+    s = s.replace(/(\.\d*?)0+$/, '$1').replace(/\.$/, '');
+    return s || '0'; // 防止空字符串
+  }
+
+  function fmtRate(r) {
+    const sign = r >= 0 ? '+' : '';
+    return sign + fmt(r) + '%';
+  }
+
+  function fmtContrib(c) {
+    const sign = c >= 0 ? '+' : '';
+    return sign + fmt(c);
+  }
+
+  /* 对照表行（供 UI 渲染） */
+  function tableRows(r) {
+    const rows = [
+      ['总体', fmt(r.base.total), fmt(r.current.total), fmtRate(r.rates.total), '—'],
+      ['这一项', fmt(r.base.item), fmt(r.current.item), fmtRate(r.rates.item), fmtContrib(r.contributions.item) + ' pp'],
+      ['其余', fmt(r.base.rest), fmt(r.current.rest), fmtRate(r.rates.rest), fmtContrib(r.contributions.rest) + ' pp'],
+    ];
+    return rows;
+  }
+  const HEAD = ['项目', '基期量', '当期量', '变化率', '贡献度'];
+
+  /* 反事实情景文字 + 应用到输入的改法（页面按钮、CSV、MD、PNG 共用一份） */
+  function scenarios(r) {
+    const cf = r.counterfactual, out = [];
+    out.push({ kind: 'noItem', text: '要是基期就没有这一项：总体会是 ' + fmtRate(cf.noItem) + '（就是其余自己的变化）',
+      apply: { rTotal: round6(cf.noItem), rItem: r.input.rItem, weight: 0 } });
+    out.push({ kind: 'itemFlat', text: '要是这一项持平（0%）、其余照实际：总体会是 ' + fmtRate(cf.itemFlat),
+      apply: { rTotal: round6(cf.itemFlat), rItem: 0, weight: r.input.weight } });
+    if (cf.breakEvenItem != null) out.push({ kind: 'breakEven', text: '其余照实际，这一项变 ' + fmtRate(cf.breakEvenItem) + ' 时总体刚好持平',
+      apply: { rTotal: 0, rItem: round6(cf.breakEvenItem), weight: r.input.weight } });
+    else out.push({ kind: 'breakEven', apply: null, text: r.input.weight === 0 ? '占比为 0，这一项怎么变都动不了总体'
+      : (cf.breakEvenNeed < -100 ? '其余照实际，这一项跌光（-100%）也拉不回持平' : '其余照实际，这一项要涨 ' + fmtRate(cf.breakEvenNeed) + ' 以上才能持平，超出本页上限') });
+    return out;
+  }
+  function round6(x) { return Math.round(x * 1e6) / 1e6; }
+  function scenarioTexts(r) { return scenarios(r).map((s) => s.text); }
+
+  /* 导出 CSV */
+  function toCSV(r, stamp) {
+    const L = [];
+    const row = (a) => L.push(a.map((x) => {
+      const s = String(x);
+      return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+    }).join(','));
+    
+    row(['项目', '剔掉一项再算']);
+    row(['生成时间', stamp]);
+    row(['总体变化率', fmtRate(r.input.rTotal)]);
+    row(['这一项的变化率', fmtRate(r.input.rItem)]);
+    row(['这一项基期占总体', fmt(r.input.weight) + '%']);
+    L.push('');
+    row(['结论', r.summary]);
+    r.facts.forEach((f) => row(['', f]));
+    L.push('');
+    row(HEAD);
+    tableRows(r).forEach(row);
+    L.push('');
+    row(['反事实情景']);
+    scenarioTexts(r).forEach((t) => row(['', t]));
+    return L.join('\n') + '\n';
+  }
+
+  /* 导出 Markdown */
+  function toMD(r, stamp) {
+    const L = [
+      '# 剔掉一项再算', '',
+      '生成时间：' + stamp, '',
+      '总体变化率 ' + fmtRate(r.input.rTotal) + '；这一项的变化率 ' + fmtRate(r.input.rItem) + '；这一项基期占总体 ' + fmt(r.input.weight) + '%。', '',
+      '**结论**：' + r.summary, '',
+    ];
+    r.facts.forEach((f) => L.push('- ' + f));
+    L.push('', '## 对照表', '', '| ' + HEAD.join(' | ') + ' |', '|' + HEAD.map(() => '---').join('|') + '|');
+    tableRows(r).forEach((row) => L.push('| ' + row.join(' | ') + ' |'));
+    L.push('', '## 反事实情景', '');
+    scenarioTexts(r).forEach((t) => L.push('- ' + t));
+    L.push('', '## 边界', '', '- 只按三个输入做线性加权拆解，默认总量 = 这一项 + 其余（物理量可加）',
+      '- 占比与变化率是你填的，不代表任何真实统计',
+      '- 只算「其余各项合起来」变了多少，不拆其余内部谁涨谁跌');
+    return L.join('\n') + '\n';
+  }
+
+  const API = { LIM, readInput, calculate, scenarios, scenarioTexts, tableRows, HEAD, toCSV, toMD, fmt, fmtRate, fmtContrib };
+  if (typeof module !== 'undefined' && module.exports) module.exports = API;
+  root.AppCore = API;
+})(typeof window !== 'undefined' ? window : globalThis);
+
+  </script>
+  <script>
+/* 剔掉一项再算 · 界面层 */
+(function () {
+  'use strict';
+  const C = window.AppCore;
+  const KEY = 'drop-one-item:v1';
+  const DEFAULT = { rTotal: -3, rItem: -30, weight: 25 };
+  const PRESETS = [
+    ['默认：总体 -3%', DEFAULT],
+    ['总体涨、一项拖后腿', { rTotal: 6, rItem: -12, weight: 15 }],
+    ['一项撑起总体', { rTotal: 3, rItem: 25, weight: 20 }],
+    ['拉不回来（无解）', { rTotal: 30, rItem: 10, weight: 10 }]
+  ];
+  const $ = (id) => document.getElementById(id);
+  let state = Object.assign({}, DEFAULT);
+  let last = null;
+  const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+
+  function writeInputs() { $('rTotal').value = state.rTotal; $('rItem').value = state.rItem; $('weight').value = state.weight; }
+  function save() { try { localStorage.setItem(KEY, JSON.stringify(state)); } catch (e) { /* 隐私模式忽略 */ } }
+  function load() {
+    try {
+      const o = JSON.parse(localStorage.getItem(KEY) || 'null');
+      if (o && typeof o === 'object') { C.calculate(o); return { rTotal: o.rTotal, rItem: o.rItem, weight: o.weight }; }
+    } catch (e) { /* 坏存档：回默认 */ }
+    return null;
+  }
+
+  function render(r) {
+    $('summary').textContent = r.summary;
+    $('summary').style.color = r.rates.rest < 0 ? '#9a3b1c' : '#2f6a45';
+    $('facts').innerHTML = r.facts.map((f) => '<li>' + esc(f) + '</li>').join('');
+
+    $('compare').querySelector('thead tr').innerHTML = C.HEAD.map((h) => '<th>' + h + '</th>').join('');
+    const vals = [r.rates.total, r.rates.item, r.rates.rest];
+    $('compare').querySelector('tbody').innerHTML = C.tableRows(r).map((row, k) => '<tr>' + row.map((v, j) => {
+      const c = j === 3 ? (vals[k] < 0 ? 'v-neg' : 'v-pos') : '';
+      return '<td class="' + c + '">' + esc(v) + '</td>';
+    }).join('') + '</tr>').join('');
+
+    /* 贡献度条：条长按 |贡献| 相对三者最大值 */
+    const items = [['这一项', r.contributions.item], ['其余', r.contributions.rest], ['总体', r.rates.total]];
+    const max = Math.max(1e-9, ...items.map((x) => Math.abs(x[1])));
+    $('contrib').innerHTML = items.map(([n, v]) => {
+      const w = Math.max(2, Math.abs(v) / max * 55);
+      return '<div class="cbar"><span class="label">' + n + '</span><span class="bar ' + (v < 0 ? 'neg' : 'pos') + '" style="width:' + w.toFixed(1) + '%"></span><span class="val">' + esc(C.fmtContrib(v)) + ' pp</span></div>';
+    }).join('');
+
+    const ul = $('scenarios'); ul.innerHTML = '';
+    C.scenarios(r).forEach((sc) => {
+      const li = document.createElement('li');
+      li.innerHTML = '<span></span>' + (sc.apply ? '<button class="ghost" data-kind="' + sc.kind + '">照这个改条件</button>' : '');
+      li.querySelector('span').textContent = sc.text;
+      if (sc.apply) li.querySelector('button').addEventListener('click', () => { state = Object.assign({}, sc.apply); writeInputs(); run(); });
+      ul.appendChild(li);
+    });
+  }
+
+  function run() {
+    document.querySelectorAll('input.bad').forEach((e) => e.classList.remove('bad'));
+    state = { rTotal: $('rTotal').value.trim(), rItem: $('rItem').value.trim(), weight: $('weight').value.trim() };
+    try {
+      const r = C.calculate(state);
+      last = r;
+      $('error').style.display = 'none';
+      $('out').style.display = '';
+      render(r);
+      save();
+    } catch (e) {
+      last = null;
+      if (e.field && $(e.field)) $(e.field).classList.add('bad');
+      if (e.field === 'currentRest' || e.field === 'verify') { $('rTotal').classList.add('bad'); $('rItem').classList.add('bad'); }
+      $('error').textContent = '算不了：' + e.message; $('error').style.display = 'block';
+      $('out').style.display = 'none';
+    }
+  }
+
+  /* ── 导出 ── */
+  function stamp() { const d = new Date(), z = (n) => String(n).padStart(2, '0'); return d.getFullYear() + '-' + z(d.getMonth() + 1) + '-' + z(d.getDate()) + ' ' + z(d.getHours()) + ':' + z(d.getMinutes()); }
+  function download(name, blob) { const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = name; document.body.appendChild(a); a.click(); setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1000); }
+  function wrap(g, t, w) {
+    const NOHEAD = '，。、；：！？）」』%';
+    const out = []; let line = '';
+    const toks = t.match(/[+\-−]?[0-9][0-9,.]*%?|[\s\S]/g) || [];
+    for (const ch of toks) {
+      if (g.measureText(line + ch).width > w && line) {
+        if (NOHEAD.indexOf(ch) >= 0) { const l = line.slice(-1); out.push(line.slice(0, -1)); line = l + ch; } else { out.push(line); line = ch; }
+      } else line += ch;
+    }
+    if (line) out.push(line); return out;
+  }
+  function drawPNG(r) {
+    const W = 1080, H = 1350;
+    const cv = document.createElement('canvas'); cv.width = W; cv.height = H;
+    const g = cv.getContext('2d'); const F = '"PingFang SC","Microsoft YaHei",sans-serif';
+    g.fillStyle = '#f5f3ef'; g.fillRect(0, 0, W, H); g.fillStyle = '#fff'; g.fillRect(50, 50, 980, 1250);
+    g.fillStyle = '#6a625a'; g.font = '30px ' + F; g.fillText('剔掉一项再算', 100, 120);
+    g.font = '24px ' + F;
+    wrap(g, '总体 ' + C.fmtRate(r.input.rTotal) + ' · 这一项 ' + C.fmtRate(r.input.rItem) + ' · 这一项基期占 ' + C.fmt(r.input.weight) + '%', 880).slice(0, 2).forEach((l, i) => g.fillText(l, 100, 162 + i * 32));
+    g.fillStyle = r.rates.rest < 0 ? '#9a3b1c' : '#2f6a45'; g.font = 'bold 44px ' + F;
+    let y = 260; wrap(g, r.summary, 880).slice(0, 3).forEach((l) => { g.fillText(l, 100, y); y += 58; });
+
+    /* 贡献度条 */
+    y += 20; g.fillStyle = '#6a625a'; g.font = '24px ' + F; g.fillText('谁贡献了多少个百分点', 100, y); y += 30;
+    const items = [['这一项', r.contributions.item], ['其余', r.contributions.rest], ['总体', r.rates.total]];
+    const max = Math.max(1e-9, ...items.map((x) => Math.abs(x[1])));
+    items.forEach(([n, v]) => {
+      g.fillStyle = '#4f4842'; g.font = '26px ' + F; g.fillText(n, 100, y + 32);
+      const w = Math.max(6, Math.abs(v) / max * 520);
+      g.fillStyle = v < 0 ? '#b3402e' : '#5f8a6c'; g.fillRect(220, y + 8, w, 34);
+      g.fillStyle = '#2a2724'; g.font = 'bold 26px ' + F; g.fillText(C.fmtContrib(v) + ' pp', 220 + w + 14, y + 34);
+      y += 56;
+    });
+
+    /* 对照表 */
+    y += 50; g.font = '22px ' + F; g.fillStyle = '#6a625a';
+    const cols = [100, 300, 470, 640, 820];
+    C.HEAD.forEach((h, i) => g.fillText(h, cols[i], y)); y += 12;
+    g.fillStyle = '#e3ddd4'; g.fillRect(100, y, 880, 2); y += 36;
+    g.font = '24px ' + F; g.fillStyle = '#2a2724';
+    C.tableRows(r).forEach((row) => { row.forEach((v, i) => g.fillText(v, cols[i], y)); y += 42; });
+
+    /* 反事实 */
+    y += 24; g.fillStyle = '#6a625a'; g.font = '24px ' + F; g.fillText('换个假设', 100, y); y += 40;
+    g.fillStyle = '#2a2724'; g.font = '24px ' + F;
+    for (const t of C.scenarioTexts(r)) {
+      const ls = wrap(g, '· ' + t, 860);
+      if (y + ls.length * 36 > 1215) break;
+      ls.forEach((l) => { g.fillText(l, 100, y); y += 36; });
+      y += 6;
+    }
+    g.fillStyle = '#857c73'; g.font = '20px ' + F;
+    g.fillText('按「总量 = 这一项 + 其余」线性拆解；数字是你填的，不代表任何真实统计。', 100, 1255);
+    return cv;
+  }
+
+  function init() {
+    PRESETS.forEach((p) => {
+      const b = document.createElement('button'); b.className = 'ghost'; b.textContent = p[0];
+      b.addEventListener('click', () => { state = Object.assign({}, p[1]); writeInputs(); run(); });
+      $('presets').appendChild(b);
+    });
+    ['rTotal', 'rItem', 'weight'].forEach((id) => $(id).addEventListener('input', run));
+    $('reset').addEventListener('click', () => { state = Object.assign({}, DEFAULT); writeInputs(); run(); });
+    $('dlCSV').addEventListener('click', () => { if (last) download('剔掉一项再算.csv', new Blob(['\ufeff' + C.toCSV(last, stamp())], { type: 'text/csv;charset=utf-8' })); });
+    $('dlMD').addEventListener('click', () => { if (last) download('剔掉一项再算.md', new Blob([C.toMD(last, stamp())], { type: 'text/markdown;charset=utf-8' })); });
+    $('dlJSON').addEventListener('click', () => { if (last) download('剔掉一项再算-备份.json', new Blob([JSON.stringify({ app: '剔掉一项再算', version: 1, savedAt: stamp(), input: last.input, result: { rest: last.rates.rest, contributions: last.contributions, counterfactual: last.counterfactual, summary: last.summary, facts: last.facts } }, null, 2)], { type: 'application/json' })); });
+    $('dlPNG').addEventListener('click', () => { if (last) drawPNG(last).toBlob((b) => download('剔掉一项再算-1080x1350.png', b), 'image/png'); });
+    state = load() || Object.assign({}, DEFAULT);
+    writeInputs(); run();
+    window.__drop = { last: () => last, state: () => state };
+  }
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init); else init();
+})();
+
+  </script>
+</body>
+</html>
